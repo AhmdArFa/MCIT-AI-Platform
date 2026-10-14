@@ -1,0 +1,10 @@
+{
+  "name": "mcit-craft-deck-builder",
+  "private": true,
+  "version": "1.0.0",
+  "description": "PptxGenJS deck construction for the DeckCraft pipeline",
+  "type": "module",
+  "dependencies": {
+    "pptxgenjs": "3.12.0"
+  }
+}

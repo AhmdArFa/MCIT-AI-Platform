@@ -1,0 +1,248 @@
+# MCIT AI platform
+#
+#   docker compose up -d --build              # Complete MCIT AI platform
+#
+# Copy .env.example to .env first and replace every CHANGE_ME value.
+# Browser entry points: MCIT AI on :8502, Tut Agent on :3210, office viewer on :8082.
+
+name: mcit-ai
+
+x-tut-env: &tut-env
+  KEY_VAULTS_SECRET: ${TUT_KEY_VAULTS_SECRET:-}
+  AUTH_SECRET: ${TUT_AUTH_SECRET:-}
+  APP_URL: ${TUT_AGENT_PUBLIC_URL:-http://localhost:3210}
+  INTERNAL_APP_URL: http://localhost:3210
+  DATABASE_URL: postgresql://postgres:${TUT_POSTGRES_PASSWORD:-}@tut-postgres:5432/tut_agent
+  REDIS_URL: redis://tut-redis:6379
+  REDIS_PREFIX: tut
+  REDIS_TLS: "0"
+  S3_ENDPOINT: ${TUT_S3_PUBLIC_URL:-http://localhost:9000}
+  S3_INTERNAL_ENDPOINT: http://tut-storage:9000
+  S3_BUCKET: lobe  # matches agent/docker-compose/mcit/bucket.config.json
+  S3_ENABLE_PATH_STYLE: "1"
+  S3_ACCESS_KEY: ${TUT_STORAGE_ACCESS_KEY:-tut}
+  S3_ACCESS_KEY_ID: ${TUT_STORAGE_ACCESS_KEY:-tut}
+  S3_SECRET_ACCESS_KEY: ${TUT_STORAGE_SECRET_KEY:-}
+  S3_SET_ACL: "0"
+  LLM_VISION_IMAGE_USE_BASE64: "1"
+  SEARXNG_URL: http://tut-search:8080
+  ENABLE_AGENT_GATEWAY: "1"
+  AGENT_GATEWAY_INTERNAL_URL: http://tut-gateway:8787
+  AGENT_GATEWAY_URL: ${TUT_GATEWAY_PUBLIC_URL:-http://localhost:8787}
+  AGENT_GATEWAY_SERVICE_TOKEN: ${TUT_GATEWAY_TOKEN:-}
+  DEVICE_GATEWAY_SERVICE_TOKEN: ${TUT_GATEWAY_TOKEN}
+  TELEMETRY_DISABLED: "1"
+  FEATURE_FLAGS: "-auth_captcha,-market,-cloud_promotion,-welcome_suggest"
+  ENABLED_OLLAMA: "1"
+  OLLAMA_PROXY_URL: http://ollama:11434
+  OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-qwen2.5:7b}
+  MCIT_STUDIO_MODEL: ${OLLAMA_CHAT_MODEL:-qwen2.5:7b}
+  # One login: Tut Agent signs users in through MCIT AI (OpenID Connect)
+  AUTH_SSO_PROVIDERS: generic-oidc
+  AUTH_DISABLE_EMAIL_PASSWORD: "1"
+  AUTH_GENERIC_OIDC_ID: ${TUT_OIDC_CLIENT_ID:-tut-agent}
+  AUTH_GENERIC_OIDC_SECRET: ${TUT_OIDC_CLIENT_SECRET:-}
+  AUTH_GENERIC_OIDC_ISSUER: http://mcit-ai:5055/api/oidc
+  AUTH_TRUSTED_ORIGINS: ${MCIT_PUBLIC_URL:-http://localhost:8502},${TUT_AGENT_PUBLIC_URL:-http://localhost:3210}
+
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2
+    command: ["start", "--log", "info", "--user", "${SURREAL_USER:-root}", "--pass", "${SURREAL_PASSWORD:-root}", "rocksdb:/mydata/mydatabase.db"]
+    user: root
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./surreal_data:/mydata
+    restart: always
+
+  # Local language models (no cloud keys needed)
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ./ollama_data:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    restart: always
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["sh", "-c", "sleep 3 && ollama pull ${OLLAMA_CHAT_MODEL:-qwen2.5:7b} && ollama pull ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}"]
+    depends_on:
+      - ollama
+    restart: "no"
+
+  # Local text-to-speech for podcasts (OpenAI-compatible API)
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    ports:
+      - "127.0.0.1:8880:8880"
+    restart: always
+
+  # Office viewer/editor for every generated file (ONLYOFFICE Docs)
+  office:
+    image: onlyoffice/documentserver:latest
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET in .env}
+      - JWT_HEADER=Authorization
+      # The document server fetches files from the MCIT AI API on the compose network
+      - ALLOW_PRIVATE_IP_ADDRESS=true
+    ports:
+      - "8082:80"
+    volumes:
+      - ./office_data:/var/www/onlyoffice/Data
+    restart: always
+
+  mcit-ai:
+    build: .
+    image: mcit-ai:local
+    ports:
+      - "8502:8502"  # Web UI (the API is served behind it on /api)
+      - "127.0.0.1:5055:5055"
+    environment:
+      - OPEN_NOTEBOOK_ENCRYPTION_KEY=${OPEN_NOTEBOOK_ENCRYPTION_KEY:?set OPEN_NOTEBOOK_ENCRYPTION_KEY in .env}
+      # Accounts
+      - MCIT_AUTH_SECRET=${MCIT_AUTH_SECRET:?set MCIT_AUTH_SECRET in .env}
+      - MCIT_ADMIN_USERNAME=${MCIT_ADMIN_USERNAME:-admin}
+      - MCIT_ADMIN_PASSWORD=${MCIT_ADMIN_PASSWORD:-1234}
+      - MCIT_PUBLIC_URL=${MCIT_PUBLIC_URL:-http://localhost:8502}
+      - MCIT_OIDC_ISSUER=http://mcit-ai:5055/api/oidc
+      - CORS_ORIGINS=${MCIT_PUBLIC_URL:-http://localhost:8502}
+      # Models
+      - OLLAMA_API_BASE=http://ollama:11434
+      - OLLAMA_CHAT_MODEL=${OLLAMA_CHAT_MODEL:-qwen2.5:7b}
+      - OLLAMA_EMBEDDING_MODEL=${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      - OPEN_NOTEBOOK_WORKER_MAX_TASKS=${OPEN_NOTEBOOK_WORKER_MAX_TASKS:-1}
+      - OPENAI_COMPATIBLE_BASE_URL_TTS=http://kokoro:8880/v1
+      - LOCAL_TTS_MODEL=kokoro
+      # Office viewer
+      - ONLYOFFICE_PUBLIC_URL=${ONLYOFFICE_PUBLIC_URL:-http://localhost:8082}
+      - ONLYOFFICE_INTERNAL_URL=http://office
+      - ONLYOFFICE_JWT_SECRET=${ONLYOFFICE_JWT_SECRET}
+      - MCIT_INTERNAL_API_URL=http://mcit-ai:5055
+      # Tut Agent
+      - TUT_AGENT_PUBLIC_URL=${TUT_AGENT_PUBLIC_URL:-http://localhost:3210}
+      - TUT_AGENT_INTERNAL_URL=http://tut-agent:3210
+      - TUT_OIDC_CLIENT_ID=${TUT_OIDC_CLIENT_ID:-tut-agent}
+      - TUT_OIDC_CLIENT_SECRET=${TUT_OIDC_CLIENT_SECRET:-}
+      # Web UI -> API
+      - API_URL=same-origin
+      # Database
+      - SURREAL_URL=ws://surrealdb:8000/rpc
+      - SURREAL_USER=${SURREAL_USER:-root}
+      - SURREAL_PASSWORD=${SURREAL_PASSWORD:-root}
+      - SURREAL_NAMESPACE=mcit_ai
+      - SURREAL_DATABASE=core
+    volumes:
+      - ./mcit_data:/app/data
+    depends_on:
+      - surrealdb
+      - ollama
+      - kokoro
+      - office
+    restart: always
+
+  # ------------------------------------------------------------------ Tut Agent
+  # The MCIT-Agent app (agent/ submodule): agent runtime, tools, skills,
+  # knowledge, memory and its own web interface. Signs in through MCIT AI.
+  tut-agent:
+    build: ./agent
+    image: mcit-tut-agent:local
+    environment: *tut-env
+    depends_on:
+      tut-postgres:
+        condition: service_healthy
+      tut-redis:
+        condition: service_healthy
+      tut-storage-init:
+        condition: service_completed_successfully
+    restart: always
+
+  tut-ui:
+    image: nginx:alpine
+    ports:
+      - "3210:3210"
+    volumes:
+      - ./docker/tut-ui.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - tut-agent
+    restart: always
+
+  tut-gateway:
+    image: ghcr.io/lobehub/lobehub-gateway:0.3.2
+    ports:
+      - "8787:8787"
+    environment:
+      - SERVICE_TOKEN=${TUT_GATEWAY_TOKEN}
+      - LOBE_API_BASE_URL=http://tut-agent:3210
+    restart: always
+
+  tut-postgres:
+    image: paradedb/paradedb:latest-pg17
+    command: ["postgres", "-c", "shared_preload_libraries=pg_search,pg_cron,pg_stat_statements"]
+    environment:
+      - POSTGRES_DB=tut_agent
+      - POSTGRES_PASSWORD=${TUT_POSTGRES_PASSWORD}
+    volumes:
+      - tut_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: always
+
+  tut-redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1000 --appendonly yes
+    volumes:
+      - tut_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: always
+
+  tut-storage:
+    image: rustfs/rustfs:latest
+    command: ["--access-key", "${TUT_STORAGE_ACCESS_KEY:-tut}", "--secret-key", "${TUT_STORAGE_SECRET_KEY}", "/data"]
+    ports:
+      - "9000:9000"
+    volumes:
+      - tut_storage_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/health >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: always
+
+  tut-storage-init:
+    image: rustfs/rc:latest
+    depends_on:
+      tut-storage:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: -c 'set -eu; rc alias set store "http://tut-storage:9000" "$${KEY}" "$${SECRET}"; rc mb store/lobe --ignore-existing; rc anonymous set private store/lobe'
+    environment:
+      - KEY=${TUT_STORAGE_ACCESS_KEY:-tut}
+      - SECRET=${TUT_STORAGE_SECRET_KEY}
+    restart: "no"
+
+  tut-search:
+    image: searxng/searxng
+    volumes:
+      - ./agent/docker-compose/mcit/searxng-settings.yml:/etc/searxng/settings.yml
+    environment:
+      - SEARXNG_SETTINGS_FILE=/etc/searxng/settings.yml
+    restart: always
+
+volumes:
+  tut_postgres_data:
+  tut_redis_data:
+  tut_storage_data:

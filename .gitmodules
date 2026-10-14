@@ -1,0 +1,21 @@
+[submodule "agent"]
+	path = agent
+	url = https://github.com/AhmdArFa/MCIT-Agent.git
+[submodule "craft/vendor/gridcraft"]
+	path = craft/vendor/gridcraft
+	url = https://github.com/storytold/gridcraft.git
+[submodule "craft/vendor/vectorcraft"]
+	path = craft/vendor/vectorcraft
+	url = https://github.com/storytold/vectorcraft.git
+[submodule "craft/vendor/wordcraft"]
+	path = craft/vendor/wordcraft
+	url = https://github.com/storytold/wordcraft.git
+[submodule "craft/vendor/deckcraft"]
+	path = craft/vendor/deckcraft
+	url = https://github.com/storytold/deckcraft.git
+[submodule "craft/vendor/pdfcraft"]
+	path = craft/vendor/pdfcraft
+	url = https://github.com/storytold/pdfcraft.git
+[submodule "craft/vendor/effectcraft"]
+	path = craft/vendor/effectcraft
+	url = https://github.com/storytold/effectcraft.git

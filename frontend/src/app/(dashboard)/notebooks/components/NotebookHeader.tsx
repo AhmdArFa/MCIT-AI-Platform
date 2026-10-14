@@ -1,0 +1,142 @@
+'use client'
+
+import { useState } from 'react'
+import { NotebookResponse } from '@/lib/types/api'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Archive, ArchiveRestore, Trash2, Sparkles, MessageSquareText } from 'lucide-react'
+import Link from 'next/link'
+import { StudioDialog } from '@/components/studio/StudioDialog'
+import { useUpdateNotebook } from '@/lib/hooks/use-notebooks'
+import { NotebookDeleteDialog } from './NotebookDeleteDialog'
+import { formatDistanceToNow } from 'date-fns'
+import { getDateLocale } from '@/lib/utils/date-locale'
+import { InlineEdit } from '@/components/common/InlineEdit'
+import { useTranslation } from '@/lib/hooks/use-translation'
+
+interface NotebookHeaderProps {
+  notebook: NotebookResponse
+}
+
+export function NotebookHeader({ notebook }: NotebookHeaderProps) {
+  const { t, language } = useTranslation()
+  const dfLocale = getDateLocale(language)
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [studioOpen, setStudioOpen] = useState(false)
+  
+  const updateNotebook = useUpdateNotebook()
+
+  const handleUpdateName = async (name: string) => {
+    if (!name || name === notebook.name) return
+    
+    await updateNotebook.mutateAsync({
+      id: notebook.id,
+      data: { name }
+    })
+  }
+
+  const handleUpdateDescription = async (description: string) => {
+    if (description === notebook.description) return
+    
+    await updateNotebook.mutateAsync({
+      id: notebook.id,
+      data: { description }
+    })
+  }
+
+  const handleArchiveToggle = () => {
+    updateNotebook.mutate({
+      id: notebook.id,
+      data: { archived: !notebook.archived }
+    })
+  }
+
+  return (
+    <>
+      <div className="pb-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 flex-1">
+              <InlineEdit
+                id="notebook-name"
+                name="notebook-name"
+                value={notebook.name}
+                onSave={handleUpdateName}
+                className="font-display text-2xl font-bold tracking-tight"
+                inputClassName="font-display text-2xl font-bold tracking-tight"
+                placeholder={t('notebooks.namePlaceholder')}
+              />
+              {notebook.archived && (
+                <Badge variant="secondary">{t('notebooks.archived')}</Badge>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/tut?notebook=${encodeURIComponent(notebook.id)}`} className="text-foreground">
+                  <MessageSquareText className="h-4 w-4 mr-2" />
+                  Ask Tut Agent
+                </Link>
+              </Button>
+              <Button size="sm" onClick={() => setStudioOpen(true)} className="font-medium">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Studio
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleArchiveToggle}
+              >
+                {notebook.archived ? (
+                  <>
+                    <ArchiveRestore className="h-4 w-4 mr-2" />
+                    {t('notebooks.unarchive')}
+                  </>
+                ) : (
+                  <>
+                    <Archive className="h-4 w-4 mr-2" />
+                    {t('notebooks.archive')}
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDeleteDialog(true)}
+                className="text-destructive hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {t('common.delete')}
+              </Button>
+            </div>
+          </div>
+
+          <InlineEdit
+            id="notebook-description"
+            name="notebook-description"
+            value={notebook.description || ''}
+            onSave={handleUpdateDescription}
+            className="text-muted-foreground"
+            inputClassName="text-muted-foreground"
+            placeholder={t('notebooks.addDescription')}
+            multiline
+            emptyText={t('notebooks.addDescription')}
+          />
+          
+          <div className="text-xs text-muted-foreground">
+            {t('common.created', { time: formatDistanceToNow(new Date(notebook.created), { addSuffix: true, locale: dfLocale }) })} • 
+            {t('common.updated', { time: formatDistanceToNow(new Date(notebook.updated), { addSuffix: true, locale: dfLocale }) })}
+          </div>
+        </div>
+      </div>
+
+      <StudioDialog notebookId={notebook.id} open={studioOpen} onOpenChange={setStudioOpen} />
+      <NotebookDeleteDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        notebookId={notebook.id}
+        notebookName={notebook.name}
+        redirectAfterDelete
+      />
+    </>
+  )
+}
